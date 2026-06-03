@@ -27,7 +27,7 @@ stepfun_llm_model = ''
 stepfun_vllm_model = 'step-1o-vision-32k'
 
 # 阿里云key
-aliyun_api_key = os.getenv('ALIYUN_API_KEY', '')
+aliyun_api_key = os.getenv('ALIYUN_API_KEY', 'sk-a806eef6e0004ae2b56c9d24b2a94263')
 aliyun_base_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 aliyun_llm_model = 'qwen-max-latest'#'qwen-turbo'#'qwen-max-latest'
 aliyun_vllm_model = 'qwen-vl-max-latest'

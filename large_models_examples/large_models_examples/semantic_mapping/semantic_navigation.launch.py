@@ -94,7 +94,8 @@ def launch_setup(context):
     vehicle_width_default = '0.25'
     preferred_obstacle_margin_default = '0.08'
     max_clearance_check_default = '0.45'
-    goal_yaw_mode_default = 'path_heading'
+    goal_yaw_mode_default = 'face_target'
+    tracking_yaw_update_degrees_default = '10.0'
     origin_x_default = '0.0'
     origin_y_default = '0.0'
     origin_yaw_default = '0.0'
@@ -130,6 +131,10 @@ def launch_setup(context):
     )
     max_clearance_check = LaunchConfiguration('max_clearance_check', default=max_clearance_check_default)
     goal_yaw_mode = LaunchConfiguration('goal_yaw_mode', default=goal_yaw_mode_default)
+    tracking_yaw_update_degrees = LaunchConfiguration(
+        'tracking_yaw_update_degrees',
+        default=tracking_yaw_update_degrees_default,
+    )
     origin_x = LaunchConfiguration('origin_x', default=origin_x_default)
     origin_y = LaunchConfiguration('origin_y', default=origin_y_default)
     origin_yaw = LaunchConfiguration('origin_yaw', default=origin_yaw_default)
@@ -178,6 +183,10 @@ def launch_setup(context):
         DeclareLaunchArgument('preferred_obstacle_margin', default_value=preferred_obstacle_margin_default),
         DeclareLaunchArgument('max_clearance_check', default_value=max_clearance_check_default),
         DeclareLaunchArgument('goal_yaw_mode', default_value=goal_yaw_mode_default),
+        DeclareLaunchArgument(
+            'tracking_yaw_update_degrees',
+            default_value=tracking_yaw_update_degrees_default,
+        ),
         DeclareLaunchArgument('origin_x', default_value=origin_x_default),
         DeclareLaunchArgument('origin_y', default_value=origin_y_default),
         DeclareLaunchArgument('origin_yaw', default_value=origin_yaw_default),
@@ -297,6 +306,7 @@ def launch_setup(context):
             'preferred_obstacle_margin': preferred_obstacle_margin,
             'max_clearance_check': max_clearance_check,
             'goal_yaw_mode': goal_yaw_mode,
+            'tracking_yaw_update_degrees': tracking_yaw_update_degrees,
             'origin_x': origin_x,
             'origin_y': origin_y,
             'origin_yaw': origin_yaw,

@@ -245,7 +245,8 @@ class SemanticNavigationTool(Node):
         self.declare_parameter('preferred_obstacle_margin', 0.08)
         self.declare_parameter('max_clearance_check', 0.45)
         self.declare_parameter('path_treat_unknown_as_obstacle', False)
-        self.declare_parameter('goal_yaw_mode', 'path_heading')
+        self.declare_parameter('goal_yaw_mode', 'face_target')
+        self.declare_parameter('tracking_yaw_update_degrees', 10.0)
         self.declare_parameter('origin_x', 0.0)
         self.declare_parameter('origin_y', 0.0)
         self.declare_parameter('origin_yaw', 0.0)
@@ -275,6 +276,10 @@ class SemanticNavigationTool(Node):
             self.get_parameter('path_treat_unknown_as_obstacle').value
         )
         self.goal_yaw_mode = str(self.get_parameter('goal_yaw_mode').value).strip().lower()
+        self.tracking_yaw_update_degrees = max(
+            1.0,
+            float(self.get_parameter('tracking_yaw_update_degrees').value),
+        )
         self.origin_x = float(self.get_parameter('origin_x').value)
         self.origin_y = float(self.get_parameter('origin_y').value)
         self.origin_yaw = float(self.get_parameter('origin_yaw').value)
@@ -288,6 +293,7 @@ class SemanticNavigationTool(Node):
         self.tracking_target = None
         self.tracking_thread = None
         self.last_tracking_goal = None
+        self.last_tracking_yaw_deg = None
         self.interrupt = False
         self.task_running = False
         self.live_objects = []
@@ -419,6 +425,8 @@ class SemanticNavigationTool(Node):
             self.get_logger().info('Wakeup received during semantic navigation, canceling current goal')
             self.interrupt = True
             self.tracking_target = None
+            self.last_tracking_goal = None
+            self.last_tracking_yaw_deg = None
             self._cancel_navigation()
         else:
             self.get_logger().info('Wakeup received, ready for a semantic navigation command')
@@ -658,6 +666,7 @@ class SemanticNavigationTool(Node):
     def track_semantic_object(self, object_name):
         self.tracking_target = object_name
         self.last_tracking_goal = None
+        self.last_tracking_yaw_deg = None
         if self.tracking_thread is None or not self.tracking_thread.is_alive():
             self.tracking_thread = threading.Thread(target=self._tracking_loop, daemon=True)
             self.tracking_thread.start()
@@ -665,6 +674,8 @@ class SemanticNavigationTool(Node):
 
     def stop_tracking(self):
         self.tracking_target = None
+        self.last_tracking_goal = None
+        self.last_tracking_yaw_deg = None
         self._cancel_navigation()
         return 'Stopped semantic object tracking.'
 
@@ -692,9 +703,19 @@ class SemanticNavigationTool(Node):
                 continue
             x, y, yaw_deg = candidate['x'], candidate['y'], candidate['yaw_deg']
             goal = (x, y)
-            if self.last_tracking_goal is None or self._distance(goal, self.last_tracking_goal) > self.goal_update_distance:
+            yaw_changed = (
+                self.last_tracking_yaw_deg is None
+                or self._angle_diff_degrees(yaw_deg, self.last_tracking_yaw_deg)
+                > self.tracking_yaw_update_degrees
+            )
+            goal_moved = (
+                self.last_tracking_goal is None
+                or self._distance(goal, self.last_tracking_goal) > self.goal_update_distance
+            )
+            if goal_moved or yaw_changed:
                 if self._send_goal(x, y, yaw_deg):
                     self.last_tracking_goal = goal
+                    self.last_tracking_yaw_deg = yaw_deg
             time.sleep(self.tracking_period)
 
     def _load_objects(self):
@@ -1218,6 +1239,10 @@ class SemanticNavigationTool(Node):
 
     def _distance(self, a, b):
         return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    def _angle_diff_degrees(self, a, b):
+        diff = (float(a) - float(b) + 180.0) % 360.0 - 180.0
+        return abs(diff)
 
 
 def main(args=None):
