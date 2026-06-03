@@ -14,6 +14,7 @@ from std_srvs.srv import Trigger, SetBool, Empty
 from speech import speech
 from interfaces.srv import SetString as SetColor
 from large_models.config import *
+from large_models.config_helpers import configure_llm_request
 from large_models_msgs.srv import SetModel, SetString, SetInt32
 
 from rclpy.executors import MultiThreadedExecutor

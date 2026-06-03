@@ -38,8 +38,7 @@ class AgentProcess(Node):
         camera_topic = self.get_parameter('camera_topic').value  #  Get camera topic(获取相机话题)
 
         self.prompt = ''  #  Prompt(提示词)
-        default_llm_config = get_llm_config()
-        self.model = default_llm_config['model']  #  Large language model(大语言模型)
+        self.model = llm_model  #  Large language model(大语言模型)
         self.chat_text = ''  # Chat text(聊天文本)
         self.model_type = 'llm'  # Model type(模型类型)
         self.asr_result = ''  # ASR result(语音识别结果)
@@ -62,10 +61,7 @@ class AgentProcess(Node):
             self.client = speech.OllamaAPI(ollama_host, timeout=60)
             self.get_logger().info(f"\033[1;32mOllama {self.client.llm('请回复ready', '', model=self.model, enable_search=self.enable_search, enable_think=self.enable_think)}\033[0m")
         else:
-            self.client = speech.OpenAIAPI(
-                default_llm_config['api_key'],
-                default_llm_config['base_url'],
-            )  # Initialize OpenAI API client(初始化OpenAI API客户端)
+            self.client = speech.OpenAIAPI(api_key, base_url)  # Initialize OpenAI API client(初始化OpenAI API客户端)
         # Create publisher and subscribers(创建发布者和订阅者)
         self.result_pub = self.create_publisher(String, '~/result', 1)  # Result publisher(结果发布者)
         self.tools_pub = self.create_publisher(Tools, '~/tools', 1)  # Tools publisher(工具发布者)

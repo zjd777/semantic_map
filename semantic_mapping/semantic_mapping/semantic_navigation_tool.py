@@ -10,7 +10,8 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from interfaces.srv import SetPose2D
-from large_models.config import get_llm_config, start_audio_path
+from large_models.config import start_audio_path
+from large_models.config_helpers import get_llm_config
 from large_models_msgs.msg import Tools
 from large_models_msgs.srv import SetModel, SetString, SetTools
 from nav_msgs.msg import OccupancyGrid
@@ -357,7 +358,11 @@ class SemanticNavigationTool(Node):
 
         if provider in ('config', 'default', ''):
             provider = None
-        elif provider not in ('stepfun', 'step', 'step_fun', 'aliyun', 'dashscope', 'qwen', 'openai', 'openrouter'):
+        elif provider not in (
+            'stepfun', 'step', 'step_fun',
+            'aliyun', 'dashscope', 'qwen',
+            'openai', 'gpt', 'openrouter', 'router',
+        ):
             self.get_logger().warn(f'Unknown llm_provider "{provider}", using config defaults')
             provider = None
 

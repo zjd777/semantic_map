@@ -20,6 +20,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 
 from speech import speech
 from large_models.config import *
+from large_models.config_helpers import get_vllm_config
 from large_models_msgs.srv import SetModel, SetString, SetInt32
 from servo_controller.bus_servo_control import set_servo_position
 from servo_controller_msgs.msg import ServosPosition, ServoPosition

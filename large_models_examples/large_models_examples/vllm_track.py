@@ -25,6 +25,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 
 from speech import speech
 from large_models.config import *
+from large_models.config_helpers import get_vllm_config
 from large_models_msgs.srv import SetString, SetModel, SetInt32
 from large_models_examples.track_anything import ObjectTracker
 

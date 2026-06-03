@@ -13,6 +13,7 @@ from std_msgs.msg import String, Bool
 from std_srvs.srv import Trigger, SetBool, Empty
 
 from large_models.config import *
+from large_models.config_helpers import configure_llm_request
 from large_models_msgs.srv import SetModel, SetString, SetInt32
 
 from servo_controller_msgs.msg import ServosPosition, ServoPosition

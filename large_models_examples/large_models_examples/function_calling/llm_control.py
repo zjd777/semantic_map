@@ -28,6 +28,7 @@ from interfaces.srv import SetString as SetColor
 
 from speech import speech
 from large_models.config import *
+from large_models.config_helpers import configure_llm_request, get_vllm_config
 from large_models_msgs.msg import Tools
 from large_models_msgs.srv import SetModel, SetString, SetTools
 

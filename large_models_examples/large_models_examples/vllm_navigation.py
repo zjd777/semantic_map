@@ -15,6 +15,7 @@ from std_msgs.msg import String, Bool
 from std_srvs.srv import Trigger, SetBool, Empty
 
 from large_models.config import *
+from large_models.config_helpers import configure_llm_request, get_vllm_config
 from large_models_msgs.srv import SetModel, SetContent, SetString, SetInt32
 
 from interfaces.srv import SetPose2D
