@@ -246,6 +246,10 @@ class SemanticNavigationTool(Node):
         self.declare_parameter('max_clearance_check', 0.45)
         self.declare_parameter('path_treat_unknown_as_obstacle', False)
         self.declare_parameter('goal_yaw_mode', 'path_heading')
+        self.declare_parameter('retry_on_stall', True)
+        self.declare_parameter('stall_timeout', 8.0)
+        self.declare_parameter('stall_min_movement', 0.06)
+        self.declare_parameter('accept_near_goal_distance', 0.18)
         self.declare_parameter('origin_x', 0.0)
         self.declare_parameter('origin_y', 0.0)
         self.declare_parameter('origin_yaw', 0.0)
@@ -275,6 +279,10 @@ class SemanticNavigationTool(Node):
             self.get_parameter('path_treat_unknown_as_obstacle').value
         )
         self.goal_yaw_mode = str(self.get_parameter('goal_yaw_mode').value).strip().lower()
+        self.retry_on_stall = self._as_bool(self.get_parameter('retry_on_stall').value)
+        self.stall_timeout = max(2.0, float(self.get_parameter('stall_timeout').value))
+        self.stall_min_movement = max(0.01, float(self.get_parameter('stall_min_movement').value))
+        self.accept_near_goal_distance = max(0.05, float(self.get_parameter('accept_near_goal_distance').value))
         self.origin_x = float(self.get_parameter('origin_x').value)
         self.origin_y = float(self.get_parameter('origin_y').value)
         self.origin_yaw = float(self.get_parameter('origin_yaw').value)
@@ -594,30 +602,87 @@ class SemanticNavigationTool(Node):
             sent_any_goal = True
             if LANGUAGE == 'Chinese':
                 self._speak(f'\u6536\u5230\uff0c\u6b63\u5728\u524d\u5f80{object_name}\u9644\u8fd1')
-            start = time.time()
-            while (
-                rclpy.ok()
-                and not self.interrupt
-                and not self.navigation_done
-                and (time.time() - start) < self.navigation_timeout
-            ):
-                time.sleep(0.1)
+            attempt_result = self._wait_for_navigation_attempt(candidate)
 
-            if self.interrupt:
+            if attempt_result == 'canceled':
                 return f"Canceled navigation to {obj.get('class_name')} ({obj.get('id')})."
-            if self.reach_goal:
+            if attempt_result in ('reached', 'near_goal'):
                 return f"Arrived near {obj.get('class_name')} ({obj.get('id')})."
-            if self.navigation_done:
+            if attempt_result in ('failed', 'stalled', 'timeout'):
                 self.get_logger().warn(
-                    'Navigation failed at stand_off=%.2f goal=(%.2f, %.2f) near %s; trying next candidate'
-                    % (candidate['stand_off'], x, y, obj.get('id'))
+                    'Navigation %s at stand_off=%.2f goal=(%.2f, %.2f) near %s; trying next candidate'
+                    % (attempt_result, candidate['stand_off'], x, y, obj.get('id'))
                 )
+                if attempt_result == 'timeout':
+                    self._cancel_navigation()
                 continue
             return f"Navigation goal sent near {obj.get('class_name')} ({obj.get('id')}), still waiting or timed out."
 
         if sent_any_goal:
             return f"Navigation failed near {obj.get('class_name')} ({obj.get('id')}) after trying safer approach distances."
         return f"Failed to send navigation goal near {obj.get('class_name')} ({obj.get('id')})."
+
+    def _wait_for_navigation_attempt(self, candidate):
+        start = time.time()
+        last_motion_time = start
+        last_pose = self._current_xy()
+
+        while (
+            rclpy.ok()
+            and not self.interrupt
+            and not self.navigation_done
+            and (time.time() - start) < self.navigation_timeout
+        ):
+            if self._is_near_candidate_goal(candidate):
+                self.get_logger().info(
+                    'Semantic goal accepted near candidate: goal=(%.2f, %.2f) distance<=%.2f'
+                    % (candidate['x'], candidate['y'], self.accept_near_goal_distance)
+                )
+                self._cancel_navigation()
+                return 'near_goal'
+
+            current_pose = self._current_xy()
+            if current_pose is not None:
+                if last_pose is None:
+                    last_pose = current_pose
+                    last_motion_time = time.time()
+                elif self._distance(current_pose, last_pose) >= self.stall_min_movement:
+                    last_pose = current_pose
+                    last_motion_time = time.time()
+                elif self.retry_on_stall and time.time() - last_motion_time > self.stall_timeout:
+                    self.get_logger().warn(
+                        'Semantic navigation appears stalled: goal=(%.2f, %.2f), '
+                        'no %.2fm translation for %.1fs; canceling this candidate'
+                        % (
+                            candidate['x'],
+                            candidate['y'],
+                            self.stall_min_movement,
+                            self.stall_timeout,
+                        )
+                    )
+                    self._cancel_navigation()
+                    return 'stalled'
+
+            time.sleep(0.1)
+
+        if self.interrupt:
+            return 'canceled'
+        if self.reach_goal:
+            return 'reached'
+        if self.navigation_done:
+            return 'failed'
+        return 'timeout'
+
+    def _current_xy(self):
+        if self.current_pose is None:
+            return None
+        return self.current_pose['x'], self.current_pose['y']
+
+    def _is_near_candidate_goal(self, candidate):
+        current_pose = self._current_xy()
+        if current_pose is None:
+            return False
+        return self._distance(current_pose, (candidate['x'], candidate['y'])) <= self.accept_near_goal_distance
 
     def return_to_origin(self):
         if self.nav_map is not None and not self._is_goal_safe(self.origin_x, self.origin_y):
@@ -972,12 +1037,14 @@ class SemanticNavigationTool(Node):
                 continue
 
             path_length = self._path_length(path)
+            path_turning = self._path_turning_score(path)
             clearance = self._path_min_clearance(path)
             side_margin = clearance - self.vehicle_width * 0.5
             margin_deficit = max(0.0, self.preferred_obstacle_margin - side_margin)
             scored_candidate = dict(candidate)
             scored_candidate.update({
                 'path_length': path_length,
+                'path_turning': path_turning,
                 'path_min_clearance': clearance,
                 'path_side_margin': side_margin,
                 'path_margin_deficit': margin_deficit,
@@ -986,6 +1053,7 @@ class SemanticNavigationTool(Node):
                     round(margin_deficit, 4),
                     -round(min(side_margin, self.preferred_obstacle_margin + 0.12), 4),
                     round(path_length, 3),
+                    round(path_turning, 3),
                     candidate['distance_index'],
                     round(candidate['angle_offset'], 3),
                 ),
@@ -1001,12 +1069,13 @@ class SemanticNavigationTool(Node):
         best = scored[0]
         self.get_logger().info(
             'Best planned semantic candidate: goal=(%.2f, %.2f) stand_off=%.2f '
-            'path_len=%.2f center_clearance=%.2f side_margin=%.2f preferred_margin=%.2f'
+            'path_len=%.2f turning=%.2f center_clearance=%.2f side_margin=%.2f preferred_margin=%.2f'
             % (
                 best['x'],
                 best['y'],
                 best['stand_off'],
                 best['path_length'],
+                best['path_turning'],
                 best['path_min_clearance'],
                 best['path_side_margin'],
                 self.preferred_obstacle_margin,
@@ -1073,6 +1142,31 @@ class SemanticNavigationTool(Node):
             pos = stamped.pose.position
             total += math.hypot(pos.x - prev.x, pos.y - prev.y)
             prev = pos
+        return total
+
+    def _path_turning_score(self, path):
+        poses = path.poses
+        if len(poses) < 3:
+            return 0.0
+
+        headings = []
+        prev = poses[0].pose.position
+        for stamped in poses[1:]:
+            pos = stamped.pose.position
+            step = math.hypot(pos.x - prev.x, pos.y - prev.y)
+            if step >= 0.03:
+                headings.append(math.atan2(pos.y - prev.y, pos.x - prev.x))
+                prev = pos
+
+        if len(headings) < 2:
+            return 0.0
+
+        total = 0.0
+        for prev_heading, heading in zip(headings, headings[1:]):
+            total += abs(math.atan2(
+                math.sin(heading - prev_heading),
+                math.cos(heading - prev_heading),
+            ))
         return total
 
     def _path_min_clearance(self, path):

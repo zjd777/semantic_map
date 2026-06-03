@@ -49,11 +49,11 @@ setup(
             'road_network_navigator = large_models_examples.road_network.road_network_navigator:main',
             'nav2_execution_node = large_models_examples.road_network.nav2_execution_node:main',
             'road_network_tool = large_models_examples.function_calling.road_network_llm.road_network_tool:main',
-            'semantic_voxel_mapper = large_models_examples.semantic_mapping.semantic_voxel_mapper:main',
-            'semantic_map_marker_publisher = large_models_examples.semantic_mapping.semantic_map_marker_publisher:main',
-            'semantic_map_editor = large_models_examples.semantic_mapping.semantic_map_editor:main',
-            'semantic_occupancy_grid_saver = large_models_examples.semantic_mapping.occupancy_grid_saver:main',
-            'semantic_navigation_tool = large_models_examples.semantic_mapping.semantic_navigation_tool:main',
+            'semantic_voxel_mapper = semantic_mapping.semantic_voxel_mapper:main',
+            'semantic_map_marker_publisher = semantic_mapping.semantic_map_marker_publisher:main',
+            'semantic_map_editor = semantic_mapping.semantic_map_editor:main',
+            'semantic_occupancy_grid_saver = semantic_mapping.occupancy_grid_saver:main',
+            'semantic_navigation_tool = semantic_mapping.semantic_navigation_tool:main',
             
             'vllm_track_arm = large_models_examples.vllm_track_arm.vllm_track_arm:main',
             

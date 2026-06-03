@@ -51,7 +51,8 @@ def launch_setup(context):
         controller_package_path = '/home/ubuntu/ros2_ws/src/driver/controller'
         slam_package_path = '/home/ubuntu/ros2_ws/src/slam'
 
-    semantic_mapping_path = os.path.dirname(os.path.realpath(__file__))
+    semantic_mapping_share = get_package_share_directory('semantic_mapping')
+    semantic_mapping_path = os.path.join(semantic_mapping_share, 'rviz')
     default_map_save_prefix = '~/ros2_ws/src/slam/maps/semantic_map'
 
     model_name = LaunchConfiguration('model_name', default='yolo26n').perform(context)
@@ -182,7 +183,7 @@ def launch_setup(context):
     )
 
     mapper_node = Node(
-        package='large_models_examples',
+        package='semantic_mapping',
         executable='semantic_voxel_mapper',
         output='screen',
         parameters=[{
@@ -212,7 +213,7 @@ def launch_setup(context):
     )
 
     occupancy_grid_saver_node = Node(
-        package='large_models_examples',
+        package='semantic_mapping',
         executable='semantic_occupancy_grid_saver',
         output='screen',
         parameters=[{

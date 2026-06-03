@@ -95,6 +95,10 @@ def launch_setup(context):
     preferred_obstacle_margin_default = '0.08'
     max_clearance_check_default = '0.45'
     goal_yaw_mode_default = 'path_heading'
+    retry_on_stall_default = 'true'
+    stall_timeout_default = '8.0'
+    stall_min_movement_default = '0.06'
+    accept_near_goal_distance_default = '0.18'
     origin_x_default = '0.0'
     origin_y_default = '0.0'
     origin_yaw_default = '0.0'
@@ -130,6 +134,13 @@ def launch_setup(context):
     )
     max_clearance_check = LaunchConfiguration('max_clearance_check', default=max_clearance_check_default)
     goal_yaw_mode = LaunchConfiguration('goal_yaw_mode', default=goal_yaw_mode_default)
+    retry_on_stall = LaunchConfiguration('retry_on_stall', default=retry_on_stall_default)
+    stall_timeout = LaunchConfiguration('stall_timeout', default=stall_timeout_default)
+    stall_min_movement = LaunchConfiguration('stall_min_movement', default=stall_min_movement_default)
+    accept_near_goal_distance = LaunchConfiguration(
+        'accept_near_goal_distance',
+        default=accept_near_goal_distance_default,
+    )
     origin_x = LaunchConfiguration('origin_x', default=origin_x_default)
     origin_y = LaunchConfiguration('origin_y', default=origin_y_default)
     origin_yaw = LaunchConfiguration('origin_yaw', default=origin_yaw_default)
@@ -149,8 +160,11 @@ def launch_setup(context):
         navigation_package_path = '/home/ubuntu/ros2_ws/src/navigation'
 
     large_models_package_path = get_package_share_directory('large_models')
-    semantic_mapping_path = os.path.dirname(os.path.realpath(__file__))
+    semantic_mapping_share = get_package_share_directory('semantic_mapping')
+    semantic_mapping_path = os.path.join(semantic_mapping_share, 'rviz')
     semantic_map_path = os.path.abspath(os.path.expanduser(os.path.expandvars(semantic_map_file_value)))
+    semantic_nav2_params = os.path.join(semantic_mapping_share, 'config', 'nav2_params_semantic.yaml')
+    semantic_controller_params = os.path.join(semantic_mapping_share, 'config', 'nav2_controller_teb_semantic.yaml')
 
     launch_arguments = [
         DeclareLaunchArgument('map', default_value=map_default),
@@ -178,6 +192,10 @@ def launch_setup(context):
         DeclareLaunchArgument('preferred_obstacle_margin', default_value=preferred_obstacle_margin_default),
         DeclareLaunchArgument('max_clearance_check', default_value=max_clearance_check_default),
         DeclareLaunchArgument('goal_yaw_mode', default_value=goal_yaw_mode_default),
+        DeclareLaunchArgument('retry_on_stall', default_value=retry_on_stall_default),
+        DeclareLaunchArgument('stall_timeout', default_value=stall_timeout_default),
+        DeclareLaunchArgument('stall_min_movement', default_value=stall_min_movement_default),
+        DeclareLaunchArgument('accept_near_goal_distance', default_value=accept_near_goal_distance_default),
         DeclareLaunchArgument('origin_x', default_value=origin_x_default),
         DeclareLaunchArgument('origin_y', default_value=origin_y_default),
         DeclareLaunchArgument('origin_yaw', default_value=origin_yaw_default),
@@ -203,6 +221,8 @@ def launch_setup(context):
             'robot_name': robot_name,
             'master_name': master_name,
             'use_teb': 'true',
+            'params_file': semantic_nav2_params,
+            'controller_param': semantic_controller_params,
         }.items(),
     )
 
@@ -236,7 +256,7 @@ def launch_setup(context):
     )
 
     live_mapper_node = Node(
-        package='large_models_examples',
+        package='semantic_mapping',
         executable='semantic_voxel_mapper',
         output='screen',
         parameters=[{
@@ -253,7 +273,7 @@ def launch_setup(context):
     )
 
     saved_marker_node = Node(
-        package='large_models_examples',
+        package='semantic_mapping',
         executable='semantic_map_marker_publisher',
         output='screen',
         parameters=[{
@@ -276,7 +296,7 @@ def launch_setup(context):
     )
 
     semantic_navigation_tool_node = Node(
-        package='large_models_examples',
+        package='semantic_mapping',
         executable='semantic_navigation_tool',
         output='screen',
         parameters=[{
@@ -297,6 +317,10 @@ def launch_setup(context):
             'preferred_obstacle_margin': preferred_obstacle_margin,
             'max_clearance_check': max_clearance_check,
             'goal_yaw_mode': goal_yaw_mode,
+            'retry_on_stall': retry_on_stall,
+            'stall_timeout': stall_timeout,
+            'stall_min_movement': stall_min_movement,
+            'accept_near_goal_distance': accept_near_goal_distance,
             'origin_x': origin_x,
             'origin_y': origin_y,
             'origin_yaw': origin_yaw,
