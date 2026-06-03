@@ -1,0 +1,57 @@
+# ROS2 generated directories
+build/
+install/
+log/
+.ros/
+
+# Runtime recordings and local data
+*.bag
+*.db3
+*.mcap
+*.sqlite
+*.sqlite3
+rosbag*/
+
+# Python cache and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# CMake and compiler output
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+compile_commands.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Local config and secrets
+.env
+.env.*
+*.local
+
+# Local editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local publishing workspace used by Codex
+_github_upload/
