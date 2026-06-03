@@ -425,10 +425,8 @@ class LLMControlMove(Node):
         self.image_pair_queue = queue.Queue(maxsize=2)
         self.image_queue = queue.Queue(maxsize=2)
 
-        if self.language == 'Chinese':
-            self.vllm_model_name = 'qwen-vl-max-latest'
-        elif self.language == 'English':
-            self.vllm_model_name = vllm_model
+        self.vllm_config = get_vllm_config()
+        self.vllm_model_name = self.vllm_config['model']
 
 
     def setup_ros_components(self):
@@ -454,10 +452,7 @@ class LLMControlMove(Node):
     def setup_services_and_clients(self):
         """设置服务和服务客户端(Setup services and clients)"""
         # LLM相关客户端(LLM related clients)
-        if self.language == 'English':
-            self.client = speech.OpenAIAPI(vllm_api_key, vllm_base_url)
-        else:
-            self.client = speech.OpenAIAPI(api_key, base_url)
+        self.client = speech.OpenAIAPI(self.vllm_config['api_key'], self.vllm_config['base_url'])
         self.set_tool_client = self.create_client(SetTools, 'agent_process/set_tool')
         self.set_model_client = self.create_client(SetModel, 'agent_process/set_model')
         self.set_prompt_client = self.create_client(SetString, 'agent_process/set_prompt')
@@ -908,15 +903,7 @@ class LLMControlMove(Node):
 
         # 设置模型(Set model)
         msg = SetModel.Request()
-        msg.model_type = 'llm_tools'
-        if self.language == 'Chinese':
-            msg.model = 'qwen3-max'
-            msg.api_key = api_key 
-            msg.base_url = base_url
-        elif self.language == 'English':
-            msg.model =  'qwen/qwen3-max'
-            msg.api_key = vllm_api_key 
-            msg.base_url = vllm_base_url
+        configure_llm_request(msg, model_type='llm_tools')
         self.send_request(self.set_model_client, msg)
 
         # 设置提示词(Set prompt)

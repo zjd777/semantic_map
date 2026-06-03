@@ -22,12 +22,19 @@ def launch_setup(context):
     robot_name = LaunchConfiguration('robot_name', default=os.environ['HOST']).perform(context)
     master_name = LaunchConfiguration('master_name', default=os.environ['MASTER']).perform(context)
     use_teb = LaunchConfiguration('use_teb', default='true').perform(context)
+    params_file = LaunchConfiguration(
+        'params_file',
+        default=os.path.join(navigation_package_path, 'config', 'nav2_params.yaml')
+    ).perform(context)
+    controller_param = LaunchConfiguration('controller_param', default='').perform(context)
 
     sim_arg = DeclareLaunchArgument('sim', default_value=sim)
     map_name_arg = DeclareLaunchArgument('map', default_value=map_name)
     master_name_arg = DeclareLaunchArgument('master_name', default_value=master_name)
     robot_name_arg = DeclareLaunchArgument('robot_name', default_value=robot_name)
     use_teb_arg = DeclareLaunchArgument('use_teb', default_value=use_teb)
+    params_file_arg = DeclareLaunchArgument('params_file', default_value=params_file)
+    controller_param_arg = DeclareLaunchArgument('controller_param', default_value=controller_param)
 
     use_sim_time = 'true' if sim == 'true' else 'false'
     use_namespace = 'true' if robot_name != '/' else 'false'
@@ -46,11 +53,12 @@ def launch_setup(context):
         launch_arguments={
             'use_sim_time': use_sim_time,
             'map': os.path.join(slam_package_path, 'maps', map_name + '.yaml'),
-            'params_file': os.path.join(navigation_package_path, 'config', 'nav2_params.yaml'),
+            'params_file': params_file,
             'namespace': robot_name,
             'use_namespace': use_namespace,
             'autostart': 'true',
             'use_teb': use_teb,
+            'controller_param': controller_param,
         }.items(),
     )
 
@@ -65,7 +73,16 @@ def launch_setup(context):
       ]
     )
 
-    return [sim_arg, map_name_arg, master_name_arg, robot_name_arg, use_teb_arg, bringup_launch]
+    return [
+        sim_arg,
+        map_name_arg,
+        master_name_arg,
+        robot_name_arg,
+        use_teb_arg,
+        params_file_arg,
+        controller_param_arg,
+        bringup_launch,
+    ]
 
 def generate_launch_description():
     return LaunchDescription([

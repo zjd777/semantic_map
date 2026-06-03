@@ -13,12 +13,26 @@ def launch_setup(context, *args, **kwargs):
     awake_method = LaunchConfiguration('awake_method', default=os.environ['MIC_TYPE'])
     chinese_awake_words = LaunchConfiguration('chinese_awake_words', default='xiao3 huan4 xiao3 huan4')
     enable_setting = LaunchConfiguration('enable_setting', default='false')
+    asr_provider = LaunchConfiguration('asr_provider', default=os.environ.get('ASR_PROVIDER', 'dashscope'))
+    asr_channels = LaunchConfiguration('asr_channels', default='1')
+    asr_input_device_index = LaunchConfiguration('asr_input_device_index', default='-1')
+    stepfun_asr_model = LaunchConfiguration('stepfun_asr_model', default=os.environ.get('STEPFUN_ASR_MODEL', 'stepaudio-2.5-asr'))
+    stepfun_asr_endpoint = LaunchConfiguration('stepfun_asr_endpoint', default=os.environ.get('STEPFUN_ASR_ENDPOINT', 'https://api.stepfun.com/v1/audio/asr/sse'))
+    stepfun_asr_device = LaunchConfiguration('stepfun_asr_device', default=os.environ.get('STEPFUN_ASR_DEVICE', 'default'))
+    stepfun_record_seconds = LaunchConfiguration('stepfun_record_seconds', default=os.environ.get('STEPFUN_RECORD_SECONDS', '4.0'))
     
     mode_arg = DeclareLaunchArgument('mode', default_value=mode)
     enable_wakeup_arg = DeclareLaunchArgument('enable_wakeup', default_value=enable_wakeup) 
     awake_method_arg = DeclareLaunchArgument('awake_method', default_value=awake_method)
     awake_words_arg = DeclareLaunchArgument('chinese_awake_words', default_value=chinese_awake_words)
     enable_setting_arg = DeclareLaunchArgument('enable_setting', default_value=enable_setting)
+    asr_provider_arg = DeclareLaunchArgument('asr_provider', default_value=asr_provider)
+    asr_channels_arg = DeclareLaunchArgument('asr_channels', default_value=asr_channels)
+    asr_input_device_index_arg = DeclareLaunchArgument('asr_input_device_index', default_value=asr_input_device_index)
+    stepfun_asr_model_arg = DeclareLaunchArgument('stepfun_asr_model', default_value=stepfun_asr_model)
+    stepfun_asr_endpoint_arg = DeclareLaunchArgument('stepfun_asr_endpoint', default_value=stepfun_asr_endpoint)
+    stepfun_asr_device_arg = DeclareLaunchArgument('stepfun_asr_device', default_value=stepfun_asr_device)
+    stepfun_record_seconds_arg = DeclareLaunchArgument('stepfun_record_seconds', default_value=stepfun_record_seconds)
 
     launch_list = [
             mode_arg,
@@ -26,6 +40,13 @@ def launch_setup(context, *args, **kwargs):
             awake_method_arg,
             awake_words_arg,
             enable_setting_arg,
+            asr_provider_arg,
+            asr_channels_arg,
+            asr_input_device_index_arg,
+            stepfun_asr_model_arg,
+            stepfun_asr_endpoint_arg,
+            stepfun_asr_device_arg,
+            stepfun_record_seconds_arg,
             ] 
 
     
@@ -82,6 +103,13 @@ def launch_setup(context, *args, **kwargs):
                      "awake_method": awake_method,
                      "awake_word": chinese_awake_words,
                      "enable_setting": enable_setting,
+                     "asr_provider": asr_provider,
+                     "asr_channels": asr_channels,
+                     "asr_input_device_index": asr_input_device_index,
+                     "stepfun_asr_model": stepfun_asr_model,
+                     "stepfun_asr_endpoint": stepfun_asr_endpoint,
+                     "stepfun_asr_device": stepfun_asr_device,
+                     "stepfun_record_seconds": stepfun_record_seconds,
                      "enable_wakeup": enable_wakeup,
                      "mode": mode,
                      "punct_model": f"{sherpa_onnx_path}/{offline_punct_model}/model.onnx"}]

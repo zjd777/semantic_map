@@ -122,10 +122,7 @@ class LLMControlMove(Node):
 
         msg = SetModel.Request()
         # msg.model = 'qwen-plus-latest'
-        msg.model = llm_model
-        msg.model_type = 'llm'
-        msg.api_key = api_key 
-        msg.base_url = base_url
+        configure_llm_request(msg, model_type='llm')
         self.send_request(self.set_model_client, msg)
 
         msg = SetString.Request()

@@ -10,7 +10,7 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from interfaces.srv import SetPose2D
-from large_models.config import api_key, base_url, llm_model, start_audio_path
+from large_models.config import get_llm_config, start_audio_path
 from large_models_msgs.msg import Tools
 from large_models_msgs.srv import SetModel, SetString, SetTools
 from nav_msgs.msg import OccupancyGrid
@@ -235,21 +235,29 @@ class SemanticNavigationTool(Node):
         self.declare_parameter('goal_clearance', 0.28)
         self.declare_parameter('occupancy_threshold', 50)
         self.declare_parameter('allow_unknown_goals', False)
-        self.declare_parameter('approach_angle_samples', 16)
-        self.declare_parameter('max_goal_attempts', 6)
+        self.declare_parameter('approach_angle_samples', 12)
+        self.declare_parameter('max_goal_attempts', 4)
         self.declare_parameter('enable_path_scoring', True)
         self.declare_parameter('planner_action_name', '/compute_path_to_pose')
-        self.declare_parameter('max_path_score_candidates', 10)
-        self.declare_parameter('path_scoring_timeout', 0.7)
+        self.declare_parameter('max_path_score_candidates', 4)
+        self.declare_parameter('path_scoring_timeout', 0.35)
+        self.declare_parameter('path_scoring_total_timeout', 1.0)
         self.declare_parameter('vehicle_width', 0.25)
         self.declare_parameter('preferred_obstacle_margin', 0.08)
         self.declare_parameter('max_clearance_check', 0.45)
         self.declare_parameter('path_treat_unknown_as_obstacle', False)
-        self.declare_parameter('goal_yaw_mode', 'face_target')
-        self.declare_parameter('tracking_yaw_update_degrees', 10.0)
+        self.declare_parameter('goal_yaw_mode', 'path_heading')
+        self.declare_parameter('retry_on_stall', True)
+        self.declare_parameter('stall_timeout', 8.0)
+        self.declare_parameter('stall_min_movement', 0.06)
+        self.declare_parameter('accept_near_goal_distance', 0.18)
         self.declare_parameter('origin_x', 0.0)
         self.declare_parameter('origin_y', 0.0)
         self.declare_parameter('origin_yaw', 0.0)
+        self.declare_parameter('llm_provider', os.getenv('LLM_PROVIDER', 'config'))
+        self.declare_parameter('llm_api_key', os.getenv('LLM_API_KEY', ''))
+        self.declare_parameter('llm_base_url', os.getenv('LLM_BASE_URL', ''))
+        self.declare_parameter('llm_model', os.getenv('LLM_MODEL', ''))
 
         self.map_file = _expand_path(self.get_parameter('map_file').value)
         self.stand_off_distance = float(self.get_parameter('stand_off_distance').value)
@@ -269,6 +277,7 @@ class SemanticNavigationTool(Node):
         self.planner_action_name = self.get_parameter('planner_action_name').value
         self.max_path_score_candidates = max(1, int(self.get_parameter('max_path_score_candidates').value))
         self.path_scoring_timeout = max(0.1, float(self.get_parameter('path_scoring_timeout').value))
+        self.path_scoring_total_timeout = max(0.2, float(self.get_parameter('path_scoring_total_timeout').value))
         self.vehicle_width = max(0.01, float(self.get_parameter('vehicle_width').value))
         self.preferred_obstacle_margin = max(0.0, float(self.get_parameter('preferred_obstacle_margin').value))
         self.max_clearance_check = max(0.05, float(self.get_parameter('max_clearance_check').value))
@@ -276,13 +285,16 @@ class SemanticNavigationTool(Node):
             self.get_parameter('path_treat_unknown_as_obstacle').value
         )
         self.goal_yaw_mode = str(self.get_parameter('goal_yaw_mode').value).strip().lower()
-        self.tracking_yaw_update_degrees = max(
-            1.0,
-            float(self.get_parameter('tracking_yaw_update_degrees').value),
-        )
+        self.retry_on_stall = self._as_bool(self.get_parameter('retry_on_stall').value)
+        self.stall_timeout = max(2.0, float(self.get_parameter('stall_timeout').value))
+        self.stall_min_movement = max(0.01, float(self.get_parameter('stall_min_movement').value))
+        self.accept_near_goal_distance = max(0.05, float(self.get_parameter('accept_near_goal_distance').value))
         self.origin_x = float(self.get_parameter('origin_x').value)
         self.origin_y = float(self.get_parameter('origin_y').value)
         self.origin_yaw = float(self.get_parameter('origin_yaw').value)
+        self.llm_provider, self.llm_api_key, self.llm_base_url, self.llm_model_name = (
+            self._resolve_llm_config()
+        )
         self.goal_retry_distances = self._goal_retry_distances()
 
         self.cb_group = ReentrantCallbackGroup()
@@ -293,7 +305,6 @@ class SemanticNavigationTool(Node):
         self.tracking_target = None
         self.tracking_thread = None
         self.last_tracking_goal = None
-        self.last_tracking_yaw_deg = None
         self.interrupt = False
         self.task_running = False
         self.live_objects = []
@@ -331,25 +342,57 @@ class SemanticNavigationTool(Node):
         self.tools_result_pub = self.create_publisher(Tools, 'agent_process/tools_result', 1)
         self.tts_text_pub = self.create_publisher(String, 'tts_node/tts_text', 1)
 
-        self.create_timer(0.0, self.init_process, callback_group=self.cb_group)
+        self.init_timer = self.create_timer(0.1, self.init_process, callback_group=self.cb_group)
 
     def _as_bool(self, value):
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
+    def _resolve_llm_config(self):
+        provider = str(self.get_parameter('llm_provider').value or 'config').strip().lower().replace('-', '_')
+        override_key = str(self.get_parameter('llm_api_key').value or '').strip()
+        override_base_url = str(self.get_parameter('llm_base_url').value or '').strip()
+        override_model = str(self.get_parameter('llm_model').value or '').strip()
+
+        if provider in ('config', 'default', ''):
+            provider = None
+        elif provider not in ('stepfun', 'step', 'step_fun', 'aliyun', 'dashscope', 'qwen', 'openai', 'openrouter'):
+            self.get_logger().warn(f'Unknown llm_provider "{provider}", using config defaults')
+            provider = None
+
+        config = get_llm_config(
+            provider=provider,
+            model_type='llm_tools',
+            model=override_model,
+            api_key_override=override_key,
+            base_url_override=override_base_url,
+        )
+        return config['provider'], config['api_key'], config['base_url'], config['model']
+
     def init_process(self):
         if hasattr(self, 'started') and self.started:
             return
         self.started = True
+        self.init_timer.cancel()
 
         self._wait_for_services()
 
         msg = SetModel.Request()
         msg.model_type = 'llm_tools'
-        msg.model = 'qwen3-max' if LANGUAGE == 'Chinese' else llm_model
-        msg.api_key = api_key
-        msg.base_url = base_url
+        msg.model = self.llm_model_name
+        msg.api_key = self.llm_api_key
+        msg.base_url = self.llm_base_url
+        msg.enable_search = False
+        msg.enable_think = False
+        if not self.llm_api_key:
+            self.get_logger().warn(
+                f'LLM provider {self.llm_provider} has no API key; voice tool calls will not work'
+            )
+        self.get_logger().info(
+            f'Semantic navigation LLM provider={self.llm_provider}, '
+            f'model={self.llm_model_name}, base_url={self.llm_base_url}'
+        )
         self.send_request(self.set_model_client, msg)
 
         prompt = SetString.Request()
@@ -370,17 +413,25 @@ class SemanticNavigationTool(Node):
         self.get_logger().info(f'Semantic navigation tool started, using {self.map_file}')
 
     def _wait_for_services(self):
-        services = [
+        required_services = [
             (self.set_model_client, 'agent_process/set_model'),
             (self.set_prompt_client, 'agent_process/set_prompt'),
             (self.set_tool_client, 'agent_process/set_tool'),
-            (self.set_pose_client, 'navigation_controller/set_pose'),
-            (self.cancel_nav_client, 'navigation_controller/cancel'),
             (self.awake_client, 'vocal_detect/enable_wakeup'),
         ]
-        for client, name in services:
+        for client, name in required_services:
             if not client.wait_for_service(timeout_sec=8.0):
                 self.get_logger().warn(f'Service {name} not available yet')
+
+        optional_services = [
+            (self.set_pose_client, 'navigation_controller/set_pose'),
+            (self.cancel_nav_client, 'navigation_controller/cancel'),
+        ]
+        for client, name in optional_services:
+            if not client.wait_for_service(timeout_sec=0.5):
+                self.get_logger().warn(
+                    f'Service {name} not available yet; navigation commands will wait when used'
+                )
 
     def get_node_state(self, request, response):
         return response
@@ -425,8 +476,6 @@ class SemanticNavigationTool(Node):
             self.get_logger().info('Wakeup received during semantic navigation, canceling current goal')
             self.interrupt = True
             self.tracking_target = None
-            self.last_tracking_goal = None
-            self.last_tracking_yaw_deg = None
             self._cancel_navigation()
         else:
             self.get_logger().info('Wakeup received, ready for a semantic navigation command')
@@ -602,30 +651,87 @@ class SemanticNavigationTool(Node):
             sent_any_goal = True
             if LANGUAGE == 'Chinese':
                 self._speak(f'\u6536\u5230\uff0c\u6b63\u5728\u524d\u5f80{object_name}\u9644\u8fd1')
-            start = time.time()
-            while (
-                rclpy.ok()
-                and not self.interrupt
-                and not self.navigation_done
-                and (time.time() - start) < self.navigation_timeout
-            ):
-                time.sleep(0.1)
+            attempt_result = self._wait_for_navigation_attempt(candidate)
 
-            if self.interrupt:
+            if attempt_result == 'canceled':
                 return f"Canceled navigation to {obj.get('class_name')} ({obj.get('id')})."
-            if self.reach_goal:
+            if attempt_result in ('reached', 'near_goal'):
                 return f"Arrived near {obj.get('class_name')} ({obj.get('id')})."
-            if self.navigation_done:
+            if attempt_result in ('failed', 'stalled', 'timeout'):
                 self.get_logger().warn(
-                    'Navigation failed at stand_off=%.2f goal=(%.2f, %.2f) near %s; trying next candidate'
-                    % (candidate['stand_off'], x, y, obj.get('id'))
+                    'Navigation %s at stand_off=%.2f goal=(%.2f, %.2f) near %s; trying next candidate'
+                    % (attempt_result, candidate['stand_off'], x, y, obj.get('id'))
                 )
+                if attempt_result == 'timeout':
+                    self._cancel_navigation()
                 continue
             return f"Navigation goal sent near {obj.get('class_name')} ({obj.get('id')}), still waiting or timed out."
 
         if sent_any_goal:
             return f"Navigation failed near {obj.get('class_name')} ({obj.get('id')}) after trying safer approach distances."
         return f"Failed to send navigation goal near {obj.get('class_name')} ({obj.get('id')})."
+
+    def _wait_for_navigation_attempt(self, candidate):
+        start = time.time()
+        last_motion_time = start
+        last_pose = self._current_xy()
+
+        while (
+            rclpy.ok()
+            and not self.interrupt
+            and not self.navigation_done
+            and (time.time() - start) < self.navigation_timeout
+        ):
+            if self._is_near_candidate_goal(candidate):
+                self.get_logger().info(
+                    'Semantic goal accepted near candidate: goal=(%.2f, %.2f) distance<=%.2f'
+                    % (candidate['x'], candidate['y'], self.accept_near_goal_distance)
+                )
+                self._cancel_navigation()
+                return 'near_goal'
+
+            current_pose = self._current_xy()
+            if current_pose is not None:
+                if last_pose is None:
+                    last_pose = current_pose
+                    last_motion_time = time.time()
+                elif self._distance(current_pose, last_pose) >= self.stall_min_movement:
+                    last_pose = current_pose
+                    last_motion_time = time.time()
+                elif self.retry_on_stall and time.time() - last_motion_time > self.stall_timeout:
+                    self.get_logger().warn(
+                        'Semantic navigation appears stalled: goal=(%.2f, %.2f), '
+                        'no %.2fm translation for %.1fs; canceling this candidate'
+                        % (
+                            candidate['x'],
+                            candidate['y'],
+                            self.stall_min_movement,
+                            self.stall_timeout,
+                        )
+                    )
+                    self._cancel_navigation()
+                    return 'stalled'
+
+            time.sleep(0.1)
+
+        if self.interrupt:
+            return 'canceled'
+        if self.reach_goal:
+            return 'reached'
+        if self.navigation_done:
+            return 'failed'
+        return 'timeout'
+
+    def _current_xy(self):
+        if self.current_pose is None:
+            return None
+        return self.current_pose['x'], self.current_pose['y']
+
+    def _is_near_candidate_goal(self, candidate):
+        current_pose = self._current_xy()
+        if current_pose is None:
+            return False
+        return self._distance(current_pose, (candidate['x'], candidate['y'])) <= self.accept_near_goal_distance
 
     def return_to_origin(self):
         if self.nav_map is not None and not self._is_goal_safe(self.origin_x, self.origin_y):
@@ -666,7 +772,6 @@ class SemanticNavigationTool(Node):
     def track_semantic_object(self, object_name):
         self.tracking_target = object_name
         self.last_tracking_goal = None
-        self.last_tracking_yaw_deg = None
         if self.tracking_thread is None or not self.tracking_thread.is_alive():
             self.tracking_thread = threading.Thread(target=self._tracking_loop, daemon=True)
             self.tracking_thread.start()
@@ -674,8 +779,6 @@ class SemanticNavigationTool(Node):
 
     def stop_tracking(self):
         self.tracking_target = None
-        self.last_tracking_goal = None
-        self.last_tracking_yaw_deg = None
         self._cancel_navigation()
         return 'Stopped semantic object tracking.'
 
@@ -703,19 +806,9 @@ class SemanticNavigationTool(Node):
                 continue
             x, y, yaw_deg = candidate['x'], candidate['y'], candidate['yaw_deg']
             goal = (x, y)
-            yaw_changed = (
-                self.last_tracking_yaw_deg is None
-                or self._angle_diff_degrees(yaw_deg, self.last_tracking_yaw_deg)
-                > self.tracking_yaw_update_degrees
-            )
-            goal_moved = (
-                self.last_tracking_goal is None
-                or self._distance(goal, self.last_tracking_goal) > self.goal_update_distance
-            )
-            if goal_moved or yaw_changed:
+            if self.last_tracking_goal is None or self._distance(goal, self.last_tracking_goal) > self.goal_update_distance:
                 if self._send_goal(x, y, yaw_deg):
                     self.last_tracking_goal = goal
-                    self.last_tracking_yaw_deg = yaw_deg
             time.sleep(self.tracking_period)
 
     def _load_objects(self):
@@ -985,20 +1078,28 @@ class SemanticNavigationTool(Node):
             return candidates
 
         limit = min(len(candidates), self.max_path_score_candidates)
+        deadline = time.time() + self.path_scoring_total_timeout
         scored = []
         scored_indices = set()
         for index, candidate in enumerate(candidates[:limit]):
-            path = self._compute_path_to_candidate(candidate)
+            if time.time() >= deadline:
+                self.get_logger().warn(
+                    'Semantic path scoring budget exhausted; using remaining candidates in geometric order'
+                )
+                break
+            path = self._compute_path_to_candidate(candidate, deadline)
             if path is None or not path.poses:
                 continue
 
             path_length = self._path_length(path)
+            path_turning = self._path_turning_score(path)
             clearance = self._path_min_clearance(path)
             side_margin = clearance - self.vehicle_width * 0.5
             margin_deficit = max(0.0, self.preferred_obstacle_margin - side_margin)
             scored_candidate = dict(candidate)
             scored_candidate.update({
                 'path_length': path_length,
+                'path_turning': path_turning,
                 'path_min_clearance': clearance,
                 'path_side_margin': side_margin,
                 'path_margin_deficit': margin_deficit,
@@ -1007,6 +1108,7 @@ class SemanticNavigationTool(Node):
                     round(margin_deficit, 4),
                     -round(min(side_margin, self.preferred_obstacle_margin + 0.12), 4),
                     round(path_length, 3),
+                    round(path_turning, 3),
                     candidate['distance_index'],
                     round(candidate['angle_offset'], 3),
                 ),
@@ -1022,12 +1124,13 @@ class SemanticNavigationTool(Node):
         best = scored[0]
         self.get_logger().info(
             'Best planned semantic candidate: goal=(%.2f, %.2f) stand_off=%.2f '
-            'path_len=%.2f center_clearance=%.2f side_margin=%.2f preferred_margin=%.2f'
+            'path_len=%.2f turning=%.2f center_clearance=%.2f side_margin=%.2f preferred_margin=%.2f'
             % (
                 best['x'],
                 best['y'],
                 best['stand_off'],
                 best['path_length'],
+                best['path_turning'],
                 best['path_min_clearance'],
                 best['path_side_margin'],
                 self.preferred_obstacle_margin,
@@ -1040,7 +1143,11 @@ class SemanticNavigationTool(Node):
         ]
         return scored + unscored
 
-    def _compute_path_to_candidate(self, candidate):
+    def _compute_path_to_candidate(self, candidate, deadline=None):
+        timeout_sec = self._path_scoring_time_left(deadline)
+        if timeout_sec <= 0.0:
+            return None
+
         goal_msg = ComputePathToPose.Goal()
         goal_msg.goal = self._make_pose_stamped(candidate['x'], candidate['y'], candidate['yaw_deg'])
         if hasattr(goal_msg, 'use_start'):
@@ -1049,15 +1156,23 @@ class SemanticNavigationTool(Node):
             goal_msg.planner_id = ''
 
         goal_future = self.compute_path_client.send_goal_async(goal_msg)
-        goal_handle = self._wait_for_future(goal_future, self.path_scoring_timeout)
+        goal_handle = self._wait_for_future(goal_future, timeout_sec)
         if goal_handle is None or not goal_handle.accepted:
             return None
 
+        timeout_sec = self._path_scoring_time_left(deadline)
+        if timeout_sec <= 0.0:
+            return None
         result_future = goal_handle.get_result_async()
-        result = self._wait_for_future(result_future, self.path_scoring_timeout)
+        result = self._wait_for_future(result_future, timeout_sec)
         if result is None or result.result is None:
             return None
         return result.result.path
+
+    def _path_scoring_time_left(self, deadline):
+        if deadline is None:
+            return self.path_scoring_timeout
+        return min(self.path_scoring_timeout, max(0.0, deadline - time.time()))
 
     def _wait_for_future(self, future, timeout_sec):
         start_time = time.time()
@@ -1094,6 +1209,31 @@ class SemanticNavigationTool(Node):
             pos = stamped.pose.position
             total += math.hypot(pos.x - prev.x, pos.y - prev.y)
             prev = pos
+        return total
+
+    def _path_turning_score(self, path):
+        poses = path.poses
+        if len(poses) < 3:
+            return 0.0
+
+        headings = []
+        prev = poses[0].pose.position
+        for stamped in poses[1:]:
+            pos = stamped.pose.position
+            step = math.hypot(pos.x - prev.x, pos.y - prev.y)
+            if step >= 0.03:
+                headings.append(math.atan2(pos.y - prev.y, pos.x - prev.x))
+                prev = pos
+
+        if len(headings) < 2:
+            return 0.0
+
+        total = 0.0
+        for prev_heading, heading in zip(headings, headings[1:]):
+            total += abs(math.atan2(
+                math.sin(heading - prev_heading),
+                math.cos(heading - prev_heading),
+            ))
         return total
 
     def _path_min_clearance(self, path):
@@ -1239,10 +1379,6 @@ class SemanticNavigationTool(Node):
 
     def _distance(self, a, b):
         return math.hypot(a[0] - b[0], a[1] - b[1])
-
-    def _angle_diff_degrees(self, a, b):
-        diff = (float(a) - float(b) + 180.0) % 360.0 - 180.0
-        return abs(diff)
 
 
 def main(args=None):

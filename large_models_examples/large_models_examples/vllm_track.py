@@ -120,7 +120,8 @@ class VLLMTrack(Node):
         self.track.set_stop_distance(self.target_stop_distance)
         self.camera_type = os.environ['DEPTH_CAMERA_TYPE']
         timer_cb_group = ReentrantCallbackGroup()
-        self.client = speech.OpenAIAPI(api_key, base_url)
+        vllm_config = get_vllm_config()
+        self.client = speech.OpenAIAPI(vllm_config['api_key'], vllm_config['base_url'])
         
         self.mecanum_pub = self.create_publisher(Twist, self.cmd_vel_topic, 1)  # Chassis control (底盘控制)
         self.target_state_pub = self.create_publisher(Vector3, self.target_state_topic, 1)
@@ -199,15 +200,7 @@ class VLLMTrack(Node):
         self.timer.cancel()
         
         msg = SetModel.Request()
-        msg.model_type = 'vllm'
-        if language == 'Chinese':
-            msg.model = stepfun_vllm_model
-            msg.api_key = stepfun_api_key
-            msg.base_url = stepfun_base_url
-        else:
-            msg.api_key = vllm_api_key
-            msg.base_url = vllm_base_url
-            msg.model = vllm_model
+        configure_vllm_request(msg, model_type='vllm')
         self.send_request(self.set_model_client, msg)
 
         msg = SetString.Request()

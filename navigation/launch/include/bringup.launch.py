@@ -27,6 +27,7 @@ def launch_setup(context):
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     params_file = LaunchConfiguration('params_file')
+    controller_param = LaunchConfiguration('controller_param')
     log_level = LaunchConfiguration('log_level')
 
     remappings = [('/tf', 'tf'),
@@ -68,6 +69,11 @@ def launch_setup(context):
         'params_file', default_value=os.path.join(navigation_package_path, 'config/nav2_params.yaml')
     )
 
+    declare_controller_param_cmd = DeclareLaunchArgument(
+        'controller_param',
+        default_value='',
+        description='Optional controller server parameter file override')
+
     declare_log_level_cmd = DeclareLaunchArgument(
         'log_level', default_value='info',
         description='log level')
@@ -103,7 +109,8 @@ def launch_setup(context):
                               'use_sim_time': use_sim_time,
                               'autostart': autostart,
                               'params_file': params_file,
-                              'use_teb': use_teb}.items()),
+                              'use_teb': use_teb,
+                              'controller_param': controller_param}.items()),
     ])
 
     return [declare_rtabmap_cmd,
@@ -113,7 +120,8 @@ def launch_setup(context):
             declare_map_yaml_cmd, 
             declare_use_sim_time_cmd, 
             declare_autostart_cmd, 
-            declare_params_file_cmd, 
+            declare_params_file_cmd,
+            declare_controller_param_cmd,
             declare_log_level_cmd,
             declare_use_teb_cmd,
             bringup_cmd_group]
