@@ -39,7 +39,8 @@ class VLLMWithCamera(Node):
         self.action_finish = False
         self.play_audio_finish = False
         self.bridge = CvBridge()
-        self.client = speech.OpenAIAPI(api_key, base_url)
+        vllm_config = get_vllm_config()
+        self.client = speech.OpenAIAPI(vllm_config['api_key'], vllm_config['base_url'])
         self.declare_parameter('camera_topic', '/depth_cam/rgb0/image_raw')
         camera_topic = self.get_parameter('camera_topic').value
         
@@ -70,16 +71,7 @@ class VLLMWithCamera(Node):
         self.timer.cancel()
         
         msg = SetModel.Request()
-        msg.model = vllm_model
-        msg.model_type = 'vllm'
-        if os.environ['ASR_LANGUAGE'] == 'Chinese':
-            msg.model = stepfun_vllm_model
-            msg.api_key = stepfun_api_key
-            msg.base_url = stepfun_base_url
-        else:
-            msg.model = vllm_model
-            msg.api_key = vllm_api_key
-            msg.base_url = vllm_base_url
+        configure_vllm_request(msg, model_type='vllm')
         self.send_request(self.set_model_client, msg)
 
         msg = SetString.Request()

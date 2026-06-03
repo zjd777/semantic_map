@@ -7,7 +7,20 @@
 语义地图相关代码位于：
 
 ```text
+semantic_mapping/
+```
+
+启动文件保留在原来的 `large_models_examples` 入口目录，方便旧命令不变：
+
+```text
 large_models_examples/large_models_examples/semantic_mapping/
+```
+
+该目录只保留：
+
+```text
+semantic_map_builder.launch.py
+semantic_navigation.launch.py
 ```
 
 核心文件：
@@ -65,7 +78,7 @@ ros2 run large_models_examples semantic_map_editor locate
 ```bash
 cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-select large_models_examples --symlink-install
+colcon build --packages-select semantic_mapping large_models_examples navigation --symlink-install
 source install/setup.bash
 ```
 
@@ -158,7 +171,9 @@ ros2 launch large_models_examples semantic_navigation.launch.py \
   enable_path_scoring:=true \
   vehicle_width:=0.25 \
   preferred_obstacle_margin:=0.08 \
-  max_path_score_candidates:=10 \
+  max_path_score_candidates:=4 \
+  path_scoring_timeout:=0.35 \
+  path_scoring_total_timeout:=1.0 \
   origin_x:=0.0 \
   origin_y:=0.0 \
   origin_yaw:=0.0 \
@@ -176,8 +191,9 @@ ros2 launch large_models_examples semantic_navigation.launch.py \
 - `enable_path_scoring`：是否启用候选路径预评分，默认 `true`。
 - `vehicle_width`：实体车宽度，默认 `0.25` 米。
 - `preferred_obstacle_margin`：期望车体边缘到障碍物至少保留的距离，默认 `0.08` 米；不足时会优先选择更安全的绕远路径。
-- `max_path_score_candidates`：每次语义导航最多预评估多少个候选点，默认 `10`。
-- `path_scoring_timeout`：单个候选路径规划等待时间，默认 `0.7` 秒。
+- `max_path_score_candidates`：每次语义导航最多预评估多少个候选点，默认 `4`。
+- `path_scoring_timeout`：单个候选路径规划等待时间，默认 `0.35` 秒。
+- `path_scoring_total_timeout`：一次语义目标选择的路径预评分总预算，默认 `1.0` 秒。
 - `max_clearance_check`：路径离障碍距离检查上限，默认 `0.45` 米。
 
 如果日志出现 `Best planned semantic candidate`，说明语义导航已经使用 Nav2 全局路径结果选择了更居中的候选目标点。若 `/compute_path_to_pose` 暂不可用，会自动退回原来的几何候选顺序。
@@ -330,7 +346,7 @@ YOLO 识别与语义位置精度：
 体素显示和文件大小：
 
 - `publish_voxel_markers` 控制是否在 RViz 显示体素。
-- `max_marker_voxels` 控制 RViz 最多显示多少体素，默认压到 `700`。
+- `max_marker_voxels` 控制 RViz 最多显示多少体素，导航默认压到 `400`，建图示例里可按需要调大。
 - `max_saved_voxels` 控制 JSON 最多保存多少体素，默认 `12000`。
 - `min_occupied_count_for_marker` / `min_occupied_count_for_save` 会过滤只出现一次的普通占据体素，减少噪声和文件体积。
 - 建图阶段默认 `integrate_depth_map:=true`，但普通 `occupied` 体素会限流、限量；导航阶段默认只读显示这些已保存体素，不再新增。

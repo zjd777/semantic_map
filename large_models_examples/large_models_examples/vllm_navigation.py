@@ -156,10 +156,7 @@ class VLLMNavigation(Node):
         self.timer.cancel()
         
         msg = SetModel.Request()
-        msg.model = llm_model
-        msg.model_type = 'llm'
-        msg.api_key = api_key 
-        msg.base_url = base_url
+        configure_llm_request(msg, model_type='llm')
         self.send_request(self.set_model_client, msg)
 
         msg = SetString.Request()
@@ -215,14 +212,10 @@ class VLLMNavigation(Node):
 
     def vision(self, query):
         msg = SetContent.Request()
-        if language == 'Chinese':
-            msg.api_key = stepfun_api_key
-            msg.base_url = stepfun_base_url
-            msg.model = stepfun_vllm_model
-        else:
-            msg.api_key = vllm_api_key
-            msg.base_url = vllm_base_url
-            msg.model = vllm_model
+        vllm_config = get_vllm_config()
+        msg.api_key = vllm_config['api_key']
+        msg.base_url = vllm_config['base_url']
+        msg.model = vllm_config['model']
         msg.prompt = VLLM_PROMPT
         msg.query = query
         self.get_logger().info('vision: %s' % query)

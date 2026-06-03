@@ -10,7 +10,7 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from interfaces.srv import SetPose2D
-from large_models.config import api_key, base_url, llm_model, start_audio_path
+from large_models.config import get_llm_config, start_audio_path
 from large_models_msgs.msg import Tools
 from large_models_msgs.srv import SetModel, SetString, SetTools
 from nav_msgs.msg import OccupancyGrid
@@ -235,12 +235,13 @@ class SemanticNavigationTool(Node):
         self.declare_parameter('goal_clearance', 0.28)
         self.declare_parameter('occupancy_threshold', 50)
         self.declare_parameter('allow_unknown_goals', False)
-        self.declare_parameter('approach_angle_samples', 16)
-        self.declare_parameter('max_goal_attempts', 6)
+        self.declare_parameter('approach_angle_samples', 12)
+        self.declare_parameter('max_goal_attempts', 4)
         self.declare_parameter('enable_path_scoring', True)
         self.declare_parameter('planner_action_name', '/compute_path_to_pose')
-        self.declare_parameter('max_path_score_candidates', 10)
-        self.declare_parameter('path_scoring_timeout', 0.7)
+        self.declare_parameter('max_path_score_candidates', 4)
+        self.declare_parameter('path_scoring_timeout', 0.35)
+        self.declare_parameter('path_scoring_total_timeout', 1.0)
         self.declare_parameter('vehicle_width', 0.25)
         self.declare_parameter('preferred_obstacle_margin', 0.08)
         self.declare_parameter('max_clearance_check', 0.45)
@@ -253,6 +254,10 @@ class SemanticNavigationTool(Node):
         self.declare_parameter('origin_x', 0.0)
         self.declare_parameter('origin_y', 0.0)
         self.declare_parameter('origin_yaw', 0.0)
+        self.declare_parameter('llm_provider', os.getenv('LLM_PROVIDER', 'config'))
+        self.declare_parameter('llm_api_key', os.getenv('LLM_API_KEY', ''))
+        self.declare_parameter('llm_base_url', os.getenv('LLM_BASE_URL', ''))
+        self.declare_parameter('llm_model', os.getenv('LLM_MODEL', ''))
 
         self.map_file = _expand_path(self.get_parameter('map_file').value)
         self.stand_off_distance = float(self.get_parameter('stand_off_distance').value)
@@ -272,6 +277,7 @@ class SemanticNavigationTool(Node):
         self.planner_action_name = self.get_parameter('planner_action_name').value
         self.max_path_score_candidates = max(1, int(self.get_parameter('max_path_score_candidates').value))
         self.path_scoring_timeout = max(0.1, float(self.get_parameter('path_scoring_timeout').value))
+        self.path_scoring_total_timeout = max(0.2, float(self.get_parameter('path_scoring_total_timeout').value))
         self.vehicle_width = max(0.01, float(self.get_parameter('vehicle_width').value))
         self.preferred_obstacle_margin = max(0.0, float(self.get_parameter('preferred_obstacle_margin').value))
         self.max_clearance_check = max(0.05, float(self.get_parameter('max_clearance_check').value))
@@ -286,6 +292,9 @@ class SemanticNavigationTool(Node):
         self.origin_x = float(self.get_parameter('origin_x').value)
         self.origin_y = float(self.get_parameter('origin_y').value)
         self.origin_yaw = float(self.get_parameter('origin_yaw').value)
+        self.llm_provider, self.llm_api_key, self.llm_base_url, self.llm_model_name = (
+            self._resolve_llm_config()
+        )
         self.goal_retry_distances = self._goal_retry_distances()
 
         self.cb_group = ReentrantCallbackGroup()
@@ -333,25 +342,57 @@ class SemanticNavigationTool(Node):
         self.tools_result_pub = self.create_publisher(Tools, 'agent_process/tools_result', 1)
         self.tts_text_pub = self.create_publisher(String, 'tts_node/tts_text', 1)
 
-        self.create_timer(0.0, self.init_process, callback_group=self.cb_group)
+        self.init_timer = self.create_timer(0.1, self.init_process, callback_group=self.cb_group)
 
     def _as_bool(self, value):
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
+    def _resolve_llm_config(self):
+        provider = str(self.get_parameter('llm_provider').value or 'config').strip().lower().replace('-', '_')
+        override_key = str(self.get_parameter('llm_api_key').value or '').strip()
+        override_base_url = str(self.get_parameter('llm_base_url').value or '').strip()
+        override_model = str(self.get_parameter('llm_model').value or '').strip()
+
+        if provider in ('config', 'default', ''):
+            provider = None
+        elif provider not in ('stepfun', 'step', 'step_fun', 'aliyun', 'dashscope', 'qwen', 'openai', 'openrouter'):
+            self.get_logger().warn(f'Unknown llm_provider "{provider}", using config defaults')
+            provider = None
+
+        config = get_llm_config(
+            provider=provider,
+            model_type='llm_tools',
+            model=override_model,
+            api_key_override=override_key,
+            base_url_override=override_base_url,
+        )
+        return config['provider'], config['api_key'], config['base_url'], config['model']
+
     def init_process(self):
         if hasattr(self, 'started') and self.started:
             return
         self.started = True
+        self.init_timer.cancel()
 
         self._wait_for_services()
 
         msg = SetModel.Request()
         msg.model_type = 'llm_tools'
-        msg.model = 'qwen3-max' if LANGUAGE == 'Chinese' else llm_model
-        msg.api_key = api_key
-        msg.base_url = base_url
+        msg.model = self.llm_model_name
+        msg.api_key = self.llm_api_key
+        msg.base_url = self.llm_base_url
+        msg.enable_search = False
+        msg.enable_think = False
+        if not self.llm_api_key:
+            self.get_logger().warn(
+                f'LLM provider {self.llm_provider} has no API key; voice tool calls will not work'
+            )
+        self.get_logger().info(
+            f'Semantic navigation LLM provider={self.llm_provider}, '
+            f'model={self.llm_model_name}, base_url={self.llm_base_url}'
+        )
         self.send_request(self.set_model_client, msg)
 
         prompt = SetString.Request()
@@ -372,17 +413,25 @@ class SemanticNavigationTool(Node):
         self.get_logger().info(f'Semantic navigation tool started, using {self.map_file}')
 
     def _wait_for_services(self):
-        services = [
+        required_services = [
             (self.set_model_client, 'agent_process/set_model'),
             (self.set_prompt_client, 'agent_process/set_prompt'),
             (self.set_tool_client, 'agent_process/set_tool'),
-            (self.set_pose_client, 'navigation_controller/set_pose'),
-            (self.cancel_nav_client, 'navigation_controller/cancel'),
             (self.awake_client, 'vocal_detect/enable_wakeup'),
         ]
-        for client, name in services:
+        for client, name in required_services:
             if not client.wait_for_service(timeout_sec=8.0):
                 self.get_logger().warn(f'Service {name} not available yet')
+
+        optional_services = [
+            (self.set_pose_client, 'navigation_controller/set_pose'),
+            (self.cancel_nav_client, 'navigation_controller/cancel'),
+        ]
+        for client, name in optional_services:
+            if not client.wait_for_service(timeout_sec=0.5):
+                self.get_logger().warn(
+                    f'Service {name} not available yet; navigation commands will wait when used'
+                )
 
     def get_node_state(self, request, response):
         return response
@@ -1029,10 +1078,16 @@ class SemanticNavigationTool(Node):
             return candidates
 
         limit = min(len(candidates), self.max_path_score_candidates)
+        deadline = time.time() + self.path_scoring_total_timeout
         scored = []
         scored_indices = set()
         for index, candidate in enumerate(candidates[:limit]):
-            path = self._compute_path_to_candidate(candidate)
+            if time.time() >= deadline:
+                self.get_logger().warn(
+                    'Semantic path scoring budget exhausted; using remaining candidates in geometric order'
+                )
+                break
+            path = self._compute_path_to_candidate(candidate, deadline)
             if path is None or not path.poses:
                 continue
 
@@ -1088,7 +1143,11 @@ class SemanticNavigationTool(Node):
         ]
         return scored + unscored
 
-    def _compute_path_to_candidate(self, candidate):
+    def _compute_path_to_candidate(self, candidate, deadline=None):
+        timeout_sec = self._path_scoring_time_left(deadline)
+        if timeout_sec <= 0.0:
+            return None
+
         goal_msg = ComputePathToPose.Goal()
         goal_msg.goal = self._make_pose_stamped(candidate['x'], candidate['y'], candidate['yaw_deg'])
         if hasattr(goal_msg, 'use_start'):
@@ -1097,15 +1156,23 @@ class SemanticNavigationTool(Node):
             goal_msg.planner_id = ''
 
         goal_future = self.compute_path_client.send_goal_async(goal_msg)
-        goal_handle = self._wait_for_future(goal_future, self.path_scoring_timeout)
+        goal_handle = self._wait_for_future(goal_future, timeout_sec)
         if goal_handle is None or not goal_handle.accepted:
             return None
 
+        timeout_sec = self._path_scoring_time_left(deadline)
+        if timeout_sec <= 0.0:
+            return None
         result_future = goal_handle.get_result_async()
-        result = self._wait_for_future(result_future, self.path_scoring_timeout)
+        result = self._wait_for_future(result_future, timeout_sec)
         if result is None or result.result is None:
             return None
         return result.result.path
+
+    def _path_scoring_time_left(self, deadline):
+        if deadline is None:
+            return self.path_scoring_timeout
+        return min(self.path_scoring_timeout, max(0.0, deadline - time.time()))
 
     def _wait_for_future(self, future, timeout_sec):
         start_time = time.time()

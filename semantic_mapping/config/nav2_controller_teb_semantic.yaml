@@ -2,7 +2,7 @@ controller_server:
   ros__parameters:
     odom_topic: /odom
     use_sim_time: False
-    controller_frequency: 15.0
+    controller_frequency: 10.0
 
     # Progress checker parameters
     progress_checker_plugin: "progress_checker"
@@ -33,16 +33,16 @@ controller_server:
 
       primary_controller: "teb_local_planner::TebLocalPlannerROS"
       teb_autosize: 1.0
-      dt_ref: 0.35
+      dt_ref: 0.40
       dt_hysteresis: 0.1
-      max_samples: 500
+      max_samples: 300
       global_plan_overwrite_orientation: True
       allow_init_with_backwards_motion: False
-      max_global_plan_lookahead_dist: 2.0
-      global_plan_viapoint_sep: 0.25
+      max_global_plan_lookahead_dist: 1.6
+      global_plan_viapoint_sep: 0.35
       global_plan_prune_distance: 1.0
       exact_arc_length: False
-      feasibility_check_no_poses: 5
+      feasibility_check_no_poses: 4
       publish_feedback: False
           
       # Robot
@@ -52,8 +52,11 @@ controller_server:
       acc_lim_theta: 3.2
 
       footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
-        type: "polygon"
-        vertices: [[0.16, 0.13], [0.16, -0.13], [-0.14, -0.13], [-0.14, 0.13]]
+        type: "two_circles"
+        front_offset: 0.03
+        front_radius: 0.13
+        rear_offset: -0.01
+        rear_radius: 0.13
 
       # GoalTolerance
       free_goal_vel: False
@@ -63,18 +66,18 @@ controller_server:
       inflation_dist: 0.22
       include_costmap_obstacles: True
       costmap_obstacles_behind_robot_dist: 1.0
-      obstacle_poses_affected: 25
+      obstacle_poses_affected: 12
 
       dynamic_obstacle_inflation_dist: 0.35
       include_dynamic_obstacles: False
 
-      costmap_converter_plugin: "costmap_converter::CostmapToPolygonsDBSMCCH"
-      costmap_converter_spin_thread: True
-      costmap_converter_rate: 5
+      costmap_converter_plugin: ""
+      costmap_converter_spin_thread: False
+      costmap_converter_rate: 2
 
       # Optimization
-      no_inner_iterations: 5
-      no_outer_iterations: 4
+      no_inner_iterations: 4
+      no_outer_iterations: 3
       optimization_activate: True
       optimization_verbose: False
       penalty_epsilon: 0.1
@@ -98,21 +101,21 @@ controller_server:
 
       # Homotopy Class Planner
       enable_homotopy_class_planning: True
-      enable_multithreading: True
-      max_number_classes: 6
+      enable_multithreading: False
+      max_number_classes: 3
       selection_cost_hysteresis: 2.0
       selection_prefer_initial_plan: 0.6
       selection_obst_cost_scale: 3.0
       selection_alternative_time_cost: True
 
-      roadmap_graph_no_samples: 25
-      roadmap_graph_area_width: 5.0
+      roadmap_graph_no_samples: 12
+      roadmap_graph_area_width: 3.0
       roadmap_graph_area_length_scale: 1.0
       h_signature_prescaler: 0.5
       h_signature_threshold: 0.1
       obstacle_heading_threshold: 0.45
       switching_blocking_period: 1.5
-      viapoints_all_candidates: True
+      viapoints_all_candidates: False
       delete_detours_backwards: True
       max_ratio_detours_duration_best_duration: 2.0
       visualize_hc_graph: False
